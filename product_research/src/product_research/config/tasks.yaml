@@ -1,0 +1,71 @@
+high_end_research_task:
+  description: >
+    Research premium and luxury products related to {topic}, focusing on high-end options that excel in quality,
+    craftsmanship, and exclusivity. Consider current market trends and user reviews given the current year is {current_year}.
+    Focus on finding products that represent the best in luxury and premium categories.
+  expected_output: >
+    A structured list containing:
+    - Top 3 premium/luxury products with detailed analysis
+    Each product should include:
+    - Product name and brief description
+    - Key premium features and specifications
+    - Price point and value proposition
+    - Justification for premium positioning
+    - Target audience and use cases
+  agent: high_end_researcher
+
+budget_research_task:
+  description: >
+    Research mid-range products related to {topic}, focusing on options that offer the best balance of quality and value.
+    Consider current market trends and user reviews given the current year is {current_year}.
+    Focus on finding products that excel in the mid-range price point.
+  expected_output: >
+    A structured list containing:
+    - Top 3 mid-range products with detailed analysis
+    Each product should include:
+    - Product name and brief description
+    - Key features and specifications
+    - Price point and value analysis
+    - Quality-to-price ratio assessment
+    - Target audience and use cases
+  agent: budget_researcher
+
+affordable_research_task:
+  description: >
+    Research budget-friendly products related to {topic}, focusing on cost-effective options that maximize value.
+    Consider current market trends and user reviews given the current year is {current_year}.
+    Focus on finding products that offer the best value at lower price points.
+  expected_output: >
+    A structured list containing:
+    - Top 3 affordable products with detailed analysis
+    Each product should include:
+    - Product name and brief description
+    - Key features and specifications
+    - Price point and value assessment
+    - Cost-saving features and benefits
+    - Target audience and use cases
+  agent: affordable_researcher
+
+reporting_task:
+  description: >
+    Consolidate and analyze findings from all three researchers to create a comprehensive recommendation report.
+    Compare products across different price points, identify value propositions, and provide clear recommendations
+    based on different user needs and budgets.
+  expected_output: >
+    A detailed product recommendation report in markdown format (without '```') containing:
+    - Executive summary of findings across all price points
+    - Price point analysis and market overview
+    - Detailed sections for each category:
+      * Premium/Luxury Options
+      * Mid-Range Value Picks
+      * Budget-Friendly Choices
+    - Cross-price point comparisons and analysis
+    - Value proposition analysis for each price tier
+    - Final recommendations based on different user needs and budgets
+    - Price-to-value ratio analysis
+  agent: reporting_analyst
+  context: 
+    - high_end_research_task
+    - budget_research_task
+    - affordable_research_task
+  output_file: report.md
