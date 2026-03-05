@@ -1,4 +1,0 @@
-User name is John Doe.
-User is an 25 year old male.
-User has recently moved to a new city.
-User has to furnish his new apartment.
