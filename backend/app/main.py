@@ -4,12 +4,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.db.models import init_db
+from app.logging_config import configure_logging
 from app.routers import chat, products, users
+from app.services import openai_service, pinecone_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # In-memory AgentState store: {user_id: AgentState}. Phase 1 adds Pinecone/OpenAI/SQLite here.
+    configure_logging()
+    init_db()
+    openai_service.init_client()
+    pinecone_service.init_client()
     app.state.sessions = {}  # dict[str, AgentState]
     yield
     app.state.sessions.clear()
@@ -41,6 +47,6 @@ async def health() -> dict:
     return {"status": "ok", "version": app.version}
 
 @app.get("/api/routes", tags=["routes"])
-async def routes()-> dict:
-    routes = [(r.methods, r.path) for r in app.routes if hasattr(r, 'path') and hasattr(r, 'methods') and r.methods]
-    return {'routes': routes}
+async def routes() -> dict:
+    registered = [(r.methods, r.path) for r in app.routes if hasattr(r, "path") and hasattr(r, "methods") and r.methods]
+    return {"routes": registered}

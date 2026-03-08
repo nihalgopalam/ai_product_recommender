@@ -428,7 +428,179 @@ Every user turn can trigger multiple LLM and embedding calls. These guardrails p
 
 ---
 
-## 11. Implementation Phases
+## 11. Logging
+
+All logging uses Python's standard `logging` module configured at application startup. No third-party logging library required.
+
+### 11.1 Configuration (`backend/app/logging_config.py`)
+
+Configure once at startup in `main.py` lifespan before any other imports write logs.
+
+```python
+import logging
+import sys
+
+def configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+        stream=sys.stdout,
+    )
+    # Silence noisy third-party loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("pinecone").setLevel(logging.WARNING)
+```
+
+Each module gets its own named logger:
+
+```python
+import logging
+logger = logging.getLogger(__name__)
+```
+
+### 11.2 What to Log Per Layer
+
+| Layer | Level | What |
+|-------|-------|------|
+| Agent nodes | `INFO` | Node entry/exit with `user_id`, key state fields (e.g. `spec.category`, product count) |
+| Agent nodes | `WARNING` | Fallback paths (0 Pinecone results, DuckDuckGo failure, product embedding skip) |
+| Agent nodes | `ERROR` | Caught exceptions with `exc_info=True` |
+| Services (OpenAI, Pinecone, SQLite) | `DEBUG` | Request parameters, response metadata (not full content) |
+| Services | `WARNING` | Retry attempts with backoff |
+| Services | `ERROR` | Final failure after retries |
+| Routers | `INFO` | Request received: `user_id`, `body.type` |
+| Routers | `ERROR` | Unhandled exceptions before raising `HTTPException` |
+
+### 11.3 Structured Log Examples
+
+```python
+# spec_extractor_node
+logger.info("spec_extractor: user_id=%s category=%s is_complete=%s", user_id, spec.category, spec.is_complete)
+
+# vector_query_node — fallback
+logger.warning("vector_query: 0 results for user_id=%s, routing to web_searcher", user_id)
+
+# db_updater_node — embedding skip
+logger.warning("db_updater: embedding failed for url=%s, skipping", product.url, exc_info=True)
+
+# profile_updater_node — SQLite failure
+logger.error("profile_updater: SQLite write failed for user_id=%s, continuing in-memory", user_id, exc_info=True)
+```
+
+---
+
+## 12. Testing (pytest)
+
+Tests live in `backend/tests/`. Run with `pytest` from the `backend/` directory. No external services are called in unit tests — all external calls are mocked.
+
+### 12.1 Structure
+
+```
+backend/
+  tests/
+    __init__.py
+    conftest.py              # shared fixtures: mock OpenAI, mock Pinecone, test client
+    unit/
+      test_spec_extractor.py
+      test_clarifier.py
+      test_vector_query.py
+      test_feature_extractor.py
+      test_preference_gate.py
+      test_web_searcher.py
+      test_db_updater.py
+      test_profile_updater.py
+      test_synthesizer.py
+      test_user_profile_service.py
+    integration/
+      test_chat_endpoint.py   # full SSE round-trip with mocked graph
+      test_health.py
+```
+
+### 12.2 Key Fixtures (`conftest.py`)
+
+```python
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+from fastapi.testclient import TestClient
+from app.main import app
+
+@pytest.fixture
+def client():
+    with TestClient(app) as c:
+        yield c
+
+@pytest.fixture
+def mock_openai(monkeypatch):
+    mock = AsyncMock()
+    mock.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content='{"category": "laptop", "constraints": {}, "keywords": ["gaming"], "is_complete": true, "missing_fields": []}'))]
+    )
+    mock.embeddings.create.return_value = MagicMock(
+        data=[MagicMock(embedding=[0.1] * 1536)]
+    )
+    monkeypatch.setattr("app.services.openai_service.client", mock)
+    return mock
+
+@pytest.fixture
+def mock_pinecone(monkeypatch):
+    mock = MagicMock()
+    mock.query.return_value = MagicMock(matches=[])
+    monkeypatch.setattr("app.services.pinecone_service.index", mock)
+    return mock
+```
+
+### 12.3 Unit Test Patterns
+
+Each agent node is a pure function — test it by constructing an `AgentState` dict directly and asserting on the returned state.
+
+```python
+# test_spec_extractor.py
+async def test_spec_extractor_complete(mock_openai):
+    state = {
+        "user_id": "test-user",
+        "messages": [ChatMessage(role="user", content="I need a gaming laptop under $1500", ...)],
+        "spec": None, ...
+    }
+    result = await spec_extractor_node(state)
+    assert result["spec"].is_complete is True
+    assert result["next_action"] == "proceed"
+
+async def test_spec_extractor_missing_category(mock_openai):
+    # Mock returns spec with is_complete=False
+    result = await spec_extractor_node(state_with_vague_message)
+    assert result["next_action"] == "clarify"
+    assert "category" in result["spec"].missing_fields
+```
+
+### 12.4 What to Test Per Phase
+
+| Phase | Tests |
+|-------|-------|
+| 2 — Spec Extraction | Complete spec → `next_action == 'proceed'`; incomplete → `next_action == 'clarify'`; missing fields populated |
+| 3 — Vector Pipeline | Pinecone results → `candidate_products` populated; 0 results → empty list (error handled in §9) |
+| 4 — Feature Feedback | `preference_gate` routing: <3 rated → `more_feedback`; ≥3 rated → `proceed`; `preference_vector` values |
+| 5 — Web Search | DuckDuckGo results parsed into `Product` objects; failure returns empty list without raising |
+| 6 — Profile Persistence | CRUD round-trip: create blank profile; EMA merge math with known inputs/outputs |
+| 7 — Synthesizer | Ranking order respects `preference_vector`; disliked products excluded; top 5 returned |
+| 8 — SSE Layer | `POST /api/chat` returns `text/event-stream`; events are valid JSON `ChatMessage` objects |
+
+### 12.5 Running Tests
+
+```bash
+cd backend
+pytest                          # all tests
+pytest tests/unit/              # unit only (no I/O)
+pytest tests/integration/       # integration (uses TestClient)
+pytest -v --tb=short            # verbose with short tracebacks
+pytest -k "spec_extractor"      # filter by name
+```
+
+---
+
+## 13. Implementation Phases
 
 Recommended build order. Each phase should be independently testable before proceeding.
 
@@ -447,7 +619,7 @@ Recommended build order. Each phase should be independently testable before proc
 
 ---
 
-## 12. Key Constraints & Decisions
+## 14. Key Constraints & Decisions
 
 | Constraint | Decision |
 |------------|----------|

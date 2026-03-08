@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -38,7 +36,7 @@ class UserProfile(BaseModel):
     disliked_products: list[str] = Field(default_factory=list)
     liked_products: list[str] = Field(default_factory=list)
     session_history: list[str] = Field(default_factory=list)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ChatMessage(BaseModel):
