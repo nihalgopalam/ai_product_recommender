@@ -8,7 +8,7 @@ Conversational AI shopping assistant. Users describe what they want; the backend
 
 Full implementation spec: `shopping-assistant-plan-v2.md`. Refer to it for all architectural decisions, data contracts, agent graph definition, error handling, and cost controls.
 
-**Current branch:** `langchain-rework` — Phase 1 in progress. Scaffold + logging + openai_service done. Pinecone service, SQLite/db layer, and agent graph not yet built.
+**Current branch:** `langchain-rework` — Phase 1 complete. Next: Phase 2 (LangGraph agent graph).
 
 ---
 
@@ -43,8 +43,13 @@ Backend runs on `http://localhost:8000`. Verify all routes: `GET /api/routes`.
 | `backend/app/routers/products.py` | `GET /api/products/search` — stub (501) |
 | `backend/app/logging_config.py` | `configure_logging()` — call first in lifespan |
 | `backend/app/services/openai_service.py` | `chat_completion()`, `embed()`, retry, cache, `init_client()` |
-| `backend/tests/conftest.py` | `client`, `mock_openai`, `reset_openai_state` (autouse) fixtures |
+| `backend/app/services/pinecone_service.py` | `query()`, `upsert()`, `init_client()` — wraps Pinecone index |
+| `backend/app/db/models.py` | `User` + `UserProfileDB` ORM models, `init_db()`, `get_session()` |
+| `backend/tests/conftest.py` | `client`, `mock_openai`, `mock_pinecone`, `reset_openai_state`, `reset_pinecone_state` (autouse) fixtures |
 | `backend/tests/unit/test_openai_service.py` | 13 unit tests |
+| `backend/tests/unit/test_db_models.py` | 5 unit tests (in-memory SQLite) |
+| `backend/tests/unit/test_pinecone_service.py` | 5 unit tests |
+| `backend/tests/integration/test_health.py` | Health + routes integration tests |
 
 ### What must be built (per `shopping-assistant-plan-v2.md`)
 
@@ -59,9 +64,7 @@ Backend runs on `http://localhost:8000`. Verify all routes: `GET /api/routes`.
 | `backend/app/agents/db_updater.py` | Embeds + upserts web results into Pinecone |
 | `backend/app/agents/profile_updater.py` | EMA merge of session prefs into SQLite `UserProfile` |
 | `backend/app/agents/synthesizer.py` | Ranks products, generates explanations (gpt-4o) |
-| `backend/app/services/pinecone_service.py` | Pinecone query/upsert |
 | `backend/app/services/user_profile.py` | SQLite CRUD for `UserProfile` |
-| `backend/app/db/` | SQLAlchemy ORM models (`users`, `user_profiles`) |
 | `backend/tests/` | pytest unit + integration tests (see §12 of plan) |
 | `frontend/` | React + Vite SPA (Phase 9) |
 
@@ -106,9 +109,13 @@ All Phase 1 deps added to `requirements.txt`. Run `pip install -r requirements.t
 - `openai.APIError` requires `httpx.Request` in constructor: `APIError("msg", httpx.Request("POST", "https://api.openai.com"), body=None)`
 - Service modules expose `_reset_for_testing()` to clear module-level state. `conftest.py` calls it via `autouse=True` fixture.
 - Mock service clients by monkeypatching the module-level variable: `monkeypatch.setattr("app.services.openai_service.client", mock)`
+- `client` fixture takes `monkeypatch` and mocks `init_db`, `openai_service.init_client`, `pinecone_service.init_client` — prevents TestClient startup failures without real credentials
+- Mock Pinecone index: `monkeypatch.setattr("app.services.pinecone_service.index", mock)` — mirrors OpenAI pattern
 
 ### Code conventions / gotchas
 
 - Do NOT use `from __future__ import annotations` in files with Pydantic models — breaks Pydantic v2 runtime annotation inspection
 - Use `datetime.now(timezone.utc)` not `datetime.utcnow()` — deprecated since Python 3.12
 - Service clients (`AsyncOpenAI`, Pinecone index) are `None` at module level, initialized via `init_client()` called in lifespan — never at import time
+- Pinecone client is synchronous — wrap `index.query()` / `index.upsert()` with `asyncio.to_thread()` in async functions
+- SQLite `create_engine()` with a file path: call `Path(db_path).parent.mkdir(parents=True, exist_ok=True)` first
