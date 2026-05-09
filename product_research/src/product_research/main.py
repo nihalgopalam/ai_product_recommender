@@ -13,16 +13,35 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 # Replace with inputs you want to test with, it will automatically
 # interpolate any tasks and agents information
 
+def get_user_inputs() -> dict:
+    """Prompt the user for topic and budget via manual entry."""
+    print("\n=== AI Product Recommender ===\n")
+
+    topic = input("Enter the product topic (e.g., 'Living room couch'): ").strip()
+    if not topic:
+        topic = "Living room couch"
+        print(f"No topic entered. Using default: '{topic}'")
+
+    budget_input = input("Enter your budget in USD (e.g., 500): ").strip()
+    try:
+        budget = float(budget_input)
+    except (ValueError, TypeError):
+        budget = 500.0
+        print(f"Invalid budget. Using default: ${budget:.0f}")
+
+    return {
+        "topic": topic,
+        "budget": budget,
+        "current_year": str(datetime.now().year),
+    }
+
+
 def run():
     """
     Run the crew.
     """
-    inputs = {
-        'topic': 'Living room coach',
-        'current_year': str(datetime.now().year),
-        'budget': 500,
-    }
-    
+    inputs = get_user_inputs()
+
     try:
         result = ProductResearch().crew().kickoff(inputs=inputs)
         print("\n\n=== Final Report ===\n")
